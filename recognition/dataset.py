@@ -13,29 +13,42 @@ class BioLayDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
-        report = item['radiology_report']
-        summary = item['layman_report']
+        report = item.get("radiology_report", "")
+        summary = item.get("layman_report", "")
 
+        # If summary is empty/whitespace, give a tiny placeholder so labels aren't all -100
+        if not isinstance(summary, str) or summary.strip() == "":
+            # use tokenizer.eos_token if available, else a small placeholder
+            summary = (self.tokenizer.eos_token or "</s>") if getattr(self.tokenizer, "eos_token", None) else "No summary."
+
+        # Tokenize input (fixed max length)
         inputs = self.tokenizer(
             report,
             truncation=True,
-            padding='max_length',
+            padding="max_length",
             max_length=self.max_input,
-            return_tensors='pt'
+            return_tensors="pt"
         )
+
+        # Tokenize target but keep at most max_output tokens; use max_length padding so we have stable label length
         targets = self.tokenizer(
             summary,
             truncation=True,
-            padding='max_length',
+            padding="max_length",
             max_length=self.max_output,
-            return_tensors='pt'
+            return_tensors="pt"
         )
 
-        labels = targets.input_ids.squeeze()
+        # Remove batch dim safely
+        input_ids = inputs.input_ids.squeeze(0)
+        attention_mask = inputs.attention_mask.squeeze(0)
+        labels = targets.input_ids.squeeze(0).long()
+
+        # Replace pad tokens with -100 so loss ignores them
         labels[labels == self.tokenizer.pad_token_id] = -100
 
         return {
-            'input_ids': inputs.input_ids.squeeze(),
-            'attention_mask': inputs.attention_mask.squeeze(),
-            'labels': labels
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels
         }
