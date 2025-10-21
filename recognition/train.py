@@ -11,6 +11,37 @@ from modules import FlanT5Summarizer
 from dataset import BioLayDataset
 from datasets import load_dataset
 
+def decode_labels(label_ids, tokenizer):
+    """Replace -100 with pad_token_id and decode to text"""
+    targets = []
+    for row in label_ids:
+        cleaned = [x if x != -100 else tokenizer.pad_token_id for x in row]
+        targets.append(tokenizer.decode(cleaned, skip_special_tokens=True))
+    return targets
+
+def evaluate(model_wrapper, data_loader, tokenizer, scorer, device, max_output_len):
+    """Evaluate model and return average ROUGE scores"""
+    model_wrapper.model.eval()
+    total_f1 = {k: 0.0 for k in ["rouge1", "rouge2", "rougeL", "rougeLsum"]}
+    n_examples = 0
+
+    with torch.no_grad():
+        for batch in tqdm(data_loader, desc="Evaluating", unit="batch"):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+
+            preds = model_wrapper.generate_batch(input_ids, attention_mask, max_length=max_output_len, num_beams=4)
+            targets = decode_labels(labels.cpu().numpy(), tokenizer)
+
+            for pred, tgt in zip(preds, targets):
+                for key in total_f1.keys():
+                    total_f1[key] += scorer.score(tgt, pred)[key].fmeasure
+                n_examples += 1
+
+    avg_rouge = {k: v / n_examples for k, v in total_f1.items()}
+    return avg_rouge
+
 def main():
     # ---------------------------
     # Config
@@ -32,9 +63,7 @@ def main():
     val_ds = load_dataset("BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track", split="validation")
     test_ds = load_dataset("BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track", split="test")
 
-    print(f"Raw train dataset length: {len(train_ds)}")
-    print(f"Raw validation dataset length: {len(val_ds)}")
-    print(f"Raw test dataset length: {len(test_ds)}")
+    print(f"Train/Val/Test lengths: {len(train_ds)}/{len(val_ds)}/{len(test_ds)}")
 
     # ---------------------------
     # Model + tokenizer
@@ -50,21 +79,16 @@ def main():
     val_dataset = BioLayDataset(val_ds, tokenizer, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
     test_dataset = BioLayDataset(test_ds, tokenizer, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
 
-    print(f"Wrapped train dataset length: {len(train_dataset)}")
-    print(f"Wrapped validation dataset length: {len(val_dataset)}")
-    print(f"Wrapped test dataset length: {len(test_dataset)}")
-    print(f"Number of train batches per epoch: {len(train_dataset)//BATCH_SIZE} (approx)")
-
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
     # ---------------------------
-    # Optimizer and scaler
+    # Optimizer, scaler, scorer
     # ---------------------------
     optimizer = AdamW(model.parameters(), lr=LR)
     scaler = GradScaler()
-    scorer = rouge_scorer.RougeScorer(["rouge1","rouge2","rougeL","rougeLsum"], use_stemmer=True)
+    scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL", "rougeLsum"], use_stemmer=True)
 
     best_rouge = -1.0
     patience_counter = 0
@@ -79,8 +103,7 @@ def main():
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
         running_loss = 0.0
-        print(f"\nEpoch {epoch}/{NUM_EPOCHS}")
-        print(f"Rows this epoch: {len(train_dataset)}")
+        print(f"\nEpoch {epoch}/{NUM_EPOCHS} — {len(train_dataset)} samples")
 
         for batch_idx, batch in enumerate(tqdm(train_loader, desc="Training", unit="batch")):
             input_ids = batch["input_ids"].to(DEVICE)
@@ -88,7 +111,7 @@ def main():
             labels = batch["labels"].to(DEVICE)
 
             optimizer.zero_grad()
-            with autocast(enabled=(DEVICE=="cuda")):
+            with autocast(enabled=(DEVICE == "cuda")):
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
                 loss = outputs.loss
 
@@ -98,10 +121,6 @@ def main():
 
             running_loss += loss.item()
 
-            if (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == len(train_loader):
-                avg_loss = running_loss / (batch_idx + 1)
-                print(f"Batch {batch_idx+1}/{len(train_loader)} — Avg loss: {avg_loss:.4f}")
-
         avg_train_loss = running_loss / len(train_loader)
         train_losses.append(avg_train_loss)
         print(f"Epoch {epoch} completed — Avg training loss: {avg_train_loss:.4f}")
@@ -109,34 +128,9 @@ def main():
         # ---------------------------
         # Validation
         # ---------------------------
-        model.eval()
-        total_f1 = {k: 0.0 for k in ["rouge1","rouge2","rougeL","rougeLsum"]}
-        n_examples = 0
-
-        with torch.no_grad():
-            for batch in val_loader:
-                input_ids = batch["input_ids"].to(DEVICE)
-                attention_mask = batch["attention_mask"].to(DEVICE)
-                labels = batch["labels"].to(DEVICE)
-
-                preds = wrapper.generate_batch(input_ids, attention_mask, max_length=MAX_OUTPUT_LEN, num_beams=4)
-
-                # decode labels
-                label_ids = labels.cpu().numpy()
-                targets = []
-                for row in label_ids:
-                    targets.append(tokenizer.decode([x if x != tokenizer.pad_token_id else tokenizer.pad_token_id for x in row], skip_special_tokens=True))
-
-                for pred, tgt in zip(preds, targets):
-                    for key in total_f1.keys():
-                        score = scorer.score(tgt, pred)[key].fmeasure
-                        total_f1[key] += score
-                    n_examples += 1
-
-        avg_rouge_scores = {k: v/n_examples for k,v in total_f1.items()}
-        val_rouges.append(avg_rouge_scores)
-        current_rouge = avg_rouge_scores["rougeLsum"]
-
+        avg_val_rouge = evaluate(wrapper, val_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
+        val_rouges.append(avg_val_rouge)
+        current_rouge = avg_val_rouge["rougeLsum"]
         print(f"Validation ROUGE-Lsum: {current_rouge:.4f}")
 
         # ---------------------------
@@ -155,55 +149,24 @@ def main():
                 break
 
     # ---------------------------
-    # Plot training metrics
+    # Plot metrics
     # ---------------------------
     plt.figure()
-    plt.plot(range(1,len(train_losses)+1), train_losses, marker='o', label='train_loss')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.title('Training loss')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    plt.plot(range(1, len(train_losses)+1), train_losses, marker='o', label='train_loss')
+    plt.xlabel('epoch'); plt.ylabel('loss'); plt.title('Training loss')
+    plt.grid(True); plt.legend(); plt.show()
 
     plt.figure()
     rougeLsum_vals = [d['rougeLsum'] for d in val_rouges]
-    plt.plot(range(1,len(rougeLsum_vals)+1), rougeLsum_vals, marker='o', label='val_rougeLsum')
-    plt.xlabel('epoch')
-    plt.ylabel('rougeLsum')
-    plt.title('Validation ROUGE-Lsum')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    plt.plot(range(1, len(rougeLsum_vals)+1), rougeLsum_vals, marker='o', label='val_rougeLsum')
+    plt.xlabel('epoch'); plt.ylabel('rougeLsum'); plt.title('Validation ROUGE-Lsum')
+    plt.grid(True); plt.legend(); plt.show()
 
     # ---------------------------
     # Final Test Evaluation
     # ---------------------------
     print("\nStarting final test evaluation...")
-    model.eval()
-    total_f1 = {k: 0.0 for k in ["rouge1","rouge2","rougeL","rougeLsum"]}
-    n_examples = 0
-
-    with torch.no_grad():
-        for batch in tqdm(test_loader, desc="Testing", unit="batch"):
-            input_ids = batch["input_ids"].to(DEVICE)
-            attention_mask = batch["attention_mask"].to(DEVICE)
-            labels = batch["labels"].to(DEVICE)
-
-            preds = wrapper.generate_batch(input_ids, attention_mask, max_length=MAX_OUTPUT_LEN, num_beams=4)
-
-            label_ids = labels.cpu().numpy()
-            targets = []
-            for row in label_ids:
-                targets.append(tokenizer.decode([x if x != tokenizer.pad_token_id else tokenizer.pad_token_id for x in row], skip_special_tokens=True))
-
-            for pred, tgt in zip(preds, targets):
-                for key in total_f1.keys():
-                    score = scorer.score(tgt, pred)[key].fmeasure
-                    total_f1[key] += score
-                n_examples += 1
-
-    avg_test_rouge = {k: v/n_examples for k,v in total_f1.items()}
+    avg_test_rouge = evaluate(wrapper, test_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
     print(f"\nFinal Test ROUGE scores: {avg_test_rouge}")
 
 if __name__ == "__main__":
