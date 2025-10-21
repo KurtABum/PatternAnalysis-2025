@@ -1,18 +1,24 @@
 import torch
+from datasets import load_dataset
 from modules import FlanT5Summarizer
 
-model_wrapper = FlanT5Summarizer()
-model_wrapper.model.load_state_dict(torch.load("best_model.pt"))
-model_wrapper.model.eval()
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model_wrapper.model.to(device)
+MODEL_DIR = "best_model"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Example usage
-examples = [
-    "Patient has a 3cm mass in the upper lobe of the right lung. Recommend follow-up CT.",
-    "MRI shows mild disc bulge at L4-L5 without nerve compression."
-]
+wrapper = FlanT5Summarizer(model_name=MODEL_DIR, device=DEVICE)
+test_ds = load_dataset("BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track", split="test")
 
-for ex in examples:
-    summary = model_wrapper.generate_summary(ex)
-    print(f"Report: {ex}\nSummary: {summary}\n")
+examples = test_ds.shuffle(seed=42)[:3]
+
+for i, item in enumerate(examples):
+    expert_report = item["radiology_report"]
+    generated_summary = wrapper.generate_summary(expert_report, max_length=128)
+
+    print(f"\n--- Example {i+1} ---")
+    print("Expert Report:")
+    print(expert_report[:500] + ("..." if len(expert_report) > 500 else ""))
+    print("\nGenerated Lay Summary:")
+    print(generated_summary)
+    print("\nTarget Lay Summary:")
+    print(item["layman_report"])
+    print("-" * 50)
