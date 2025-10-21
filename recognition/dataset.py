@@ -13,22 +13,29 @@ class BioLayDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
+        report = item['radiology_report']
+        summary = item['layman_report']
+
         inputs = self.tokenizer(
-            item['report'],
+            report,
             truncation=True,
             padding='max_length',
             max_length=self.max_input,
             return_tensors='pt'
         )
         targets = self.tokenizer(
-            item['summary'],
+            summary,
             truncation=True,
             padding='max_length',
             max_length=self.max_output,
             return_tensors='pt'
         )
+
+        labels = targets.input_ids.squeeze()
+        labels[labels == self.tokenizer.pad_token_id] = -100
+
         return {
             'input_ids': inputs.input_ids.squeeze(),
             'attention_mask': inputs.attention_mask.squeeze(),
-            'labels': targets.input_ids.squeeze()
+            'labels': labels
         }
