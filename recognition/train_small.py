@@ -122,6 +122,9 @@ def evaluate(model_wrapper, data_loader, tokenizer, scorer, device, max_output_l
                     total_f1[key] += scorer.score(tgt, pred)[key].fmeasure
                 n_examples += 1
 
+    # guard against division by zero
+    if n_examples == 0:
+        return {k: 0.0 for k in total_f1}
     avg_rouge = {k: v / n_examples for k, v in total_f1.items()}
     return avg_rouge
 
@@ -155,13 +158,15 @@ for epoch in range(1, NUM_EPOCHS + 1):
     avg_train_loss = running_loss / len(train_loader)
     print(f"✅ Epoch {epoch} — Avg train loss: {avg_train_loss:.4f}")
 
-    # Validation
+    # Validation — print full set of ROUGE scores
     avg_val_rouge = evaluate(wrapper, val_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
-    current_rouge = avg_val_rouge["rougeLsum"]
-    print(f"📊 Validation ROUGE-Lsum: {current_rouge:.4f}")
+    # formatted print of all metrics
+    metrics_str = ", ".join([f"{k}: {v:.4f}" for k, v in avg_val_rouge.items()])
+    print(f"📊 Validation ROUGE — {metrics_str}")
 
-    if current_rouge > best_rouge:
-        best_rouge = current_rouge
+    # keep same saving criterion (based on rougeLsum)
+    if avg_val_rouge.get("rougeLsum", 0.0) > best_rouge:
+        best_rouge = avg_val_rouge["rougeLsum"]
         os.makedirs(SAVE_DIR, exist_ok=True)
         wrapper.save_pretrained(SAVE_DIR)
         print(f"💾 Saved best model to {SAVE_DIR}")
@@ -171,4 +176,5 @@ for epoch in range(1, NUM_EPOCHS + 1):
 # ---------------------------
 print("\n🧪 Evaluating best model on test set...")
 avg_test_rouge = evaluate(wrapper, test_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
-print(f"🏁 Test ROUGE scores: {avg_test_rouge}")
+metrics_str = ", ".join([f"{k}: {v:.4f}" for k, v in avg_test_rouge.items()])
+print(f"🏁 Test ROUGE — {metrics_str}")
