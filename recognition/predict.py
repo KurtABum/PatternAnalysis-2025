@@ -7,7 +7,7 @@ from modules import FlanT5Summarizer
 # ---------------------------
 MODEL_DIR = "best_model_test"  # local folder with your trained model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_OUTPUT_LEN = 128  # max length for generated summaries
+MAX_OUTPUT_LEN = 512  # max length for generated summaries
 NUM_EXAMPLES = 5     # number of examples to preview
 
 # ---------------------------
