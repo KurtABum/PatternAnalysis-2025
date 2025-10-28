@@ -5,7 +5,7 @@ from torch.optim import AdamW
 from rouge_score import rouge_scorer
 from tqdm import tqdm
 
-from modules import FlanT5Summarizer
+from modules import FlanT5Summariser
 from dataset import BioLayDataset
 from datasets import load_dataset
 
@@ -42,7 +42,7 @@ print(f"Train/Val/Test sizes: {len(train_ds)}/{len(val_ds)}/{len(test_ds)}")
 # ---------------------------
 # Model + tokenizer
 # ---------------------------
-wrapper = FlanT5Summarizer(model_name=MODEL_NAME, device=DEVICE)
+wrapper = FlanT5Summariser(model_name=MODEL_NAME, device=DEVICE)
 tokenizer = wrapper.tokenizer
 model = wrapper.model
 

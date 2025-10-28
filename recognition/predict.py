@@ -1,23 +1,14 @@
 import torch
 from datasets import load_dataset
-from modules import FlanT5Summarizer
+from modules import FlanT5Summariser
 
-# ---------------------------
-# Config
-# ---------------------------
-MODEL_DIR = "best_model_test"  # local folder with your trained model
+MODEL_DIR = "best_model_test"  #directory of trained model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_OUTPUT_LEN = 512  # max length for generated summaries
-NUM_EXAMPLES = 5     # number of examples to preview
+MAX_OUTPUT_LEN = 512  #max length for generated summaries
+NUM_EXAMPLES = 5     
 
-# ---------------------------
-# Load model
-# ---------------------------
-wrapper = FlanT5Summarizer(model_name=MODEL_DIR, device=DEVICE)
+model = FlanT5Summariser(model_name=MODEL_DIR, device=DEVICE)
 
-# ---------------------------
-# Load test dataset
-# ---------------------------
 test_ds = load_dataset(
     "BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track",
     split="test"
@@ -26,12 +17,10 @@ test_ds = load_dataset(
 # Select a few examples safely using `.select()`
 examples = test_ds.shuffle(seed=42).select(range(NUM_EXAMPLES))
 
-# ---------------------------
-# Generate summaries
-# ---------------------------
+#generate and print summaries
 for i, item in enumerate(examples):
     expert_report = item["radiology_report"]
-    generated_summary = wrapper.generate_summary(expert_report, max_length=MAX_OUTPUT_LEN)
+    generated_summary = model.generate_summary(expert_report, max_length=MAX_OUTPUT_LEN)
 
     print(f"\n--- Example {i+1} ---")
     print("Expert Report:")

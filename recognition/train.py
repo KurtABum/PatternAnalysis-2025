@@ -5,26 +5,22 @@ from torch.optim import AdamW
 from rouge_score import rouge_scorer
 from tqdm import tqdm
 
-from modules import FlanT5Summarizer
+from modules import FlanT5Summariser
 from dataset import BioLayDataset
 from datasets import load_dataset
 
-# ---------------------------
-# Config (quick full-length training)
-# ---------------------------
+#parameters to configure
 MODEL_NAME = "google/flan-t5-small"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 2
 NUM_EPOCHS = 5
 LR = 5e-6
-MAX_INPUT_LEN = 2048   # full report
-MAX_OUTPUT_LEN = 512   # full summary
+MAX_INPUT_LEN = 2048   # maximum input token length
+MAX_OUTPUT_LEN = 512   # maximum summary token length
 SAVE_DIR = "best_model"
 DIAG_BATCHES = 5
 
-# ---------------------------
-# Load small subset of datasets
-# ---------------------------
+#load datasets
 train_ds = load_dataset(
     "BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track",
     split="train"
@@ -39,15 +35,13 @@ test_ds = load_dataset(
 )
 print(f"Train/Val/Test sizes: {len(train_ds)}/{len(val_ds)}/{len(test_ds)}")
 
-# ---------------------------
-# Model + tokenizer
-# ---------------------------
-wrapper = FlanT5Summarizer(model_name=MODEL_NAME, device=DEVICE)
-tokenizer = wrapper.tokenizer
+wrapper = FlanT5Summariser(model_name=MODEL_NAME, device=DEVICE)
+tokeniser = wrapper.tokeniser
 model = wrapper.model
 
 # Quick NaN check
 def params_have_nan(model):
+    """Check if any model parameters contain NaNs"""
     for n, p in model.named_parameters():
         if p is None:
             continue
@@ -59,15 +53,13 @@ has_nan, param_name = params_have_nan(model)
 if has_nan:
     raise RuntimeError(f"Model parameter {param_name} contains NaNs — aborting.")
 
-# ---------------------------
-# Dataset + DataLoader
-# ---------------------------
-train_dataset = BioLayDataset(train_ds, tokenizer, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
-val_dataset   = BioLayDataset(val_ds, tokenizer, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
-test_dataset  = BioLayDataset(test_ds, tokenizer, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
+#dataset and dataloaders
+train_dataset = BioLayDataset(train_ds, tokeniser, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
+val_dataset   = BioLayDataset(val_ds, tokeniser, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
+test_dataset  = BioLayDataset(test_ds, tokeniser, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
 
-# Fast collate function to avoid slow tensor warning
 def collate_fn(batch):
+    """Collate batch tensors for DataLoader"""
     input_ids = torch.stack([b["input_ids"] for b in batch])
     attention_mask = torch.stack([b["attention_mask"] for b in batch])
     labels = torch.stack([b["labels"] for b in batch])
@@ -77,26 +69,29 @@ train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, co
 val_loader   = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 test_loader  = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
-# ---------------------------
-# Optimizer, scorer
-# ---------------------------
-optimizer = AdamW(model.parameters(), lr=LR)
+#optimiser and ROUGE scorer
+optimiser = AdamW(model.parameters(), lr=LR)
 scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL", "rougeLsum"], use_stemmer=True)
 
-# ---------------------------
-# Utilities
-# ---------------------------
-def decode_labels(label_ids, tokenizer):
-    """Decode labels to clean text, ignoring -100 and pad tokens"""
+def decode_labels(label_ids, tokeniser):
+    """
+    Decode label IDs to text, ignoring pad and -100 tokens
+    Returns list of strings
+    """
     targets = []
+
+    #iterate over each sequence in the batch
     for row in label_ids:
-        cleaned = [x for x in row if x not in (-100, tokenizer.pad_token_id)]
-        text = tokenizer.decode(cleaned, skip_special_tokens=True)
-        targets.append(text.lower().strip())  # normalize for ROUGE
+        cleaned = [x for x in row if x not in (-100, tokeniser.pad_token_id)]
+        text = tokeniser.decode(cleaned, skip_special_tokens=True)
+        targets.append(text.lower().strip())
     return targets
 
-def evaluate(model_wrapper, data_loader, tokenizer, scorer, device, max_output_len):
-    """Compute ROUGE scores on a dataset"""
+def evaluate(model_wrapper, data_loader, tokeniser, scorer, device, max_output_len):
+    """
+    Compute ROUGE scores on a dataset
+    Returns dict of average ROUGE metrics
+    """
     model_wrapper.model.eval()
     total_f1 = {k: 0.0 for k in ["rouge1", "rouge2", "rougeL", "rougeLsum"]}
     n_examples = 0
@@ -107,32 +102,29 @@ def evaluate(model_wrapper, data_loader, tokenizer, scorer, device, max_output_l
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            # Generate summaries
+            #generate summaries
             preds = model_wrapper.generate_batch(
                 input_ids, attention_mask, max_length=max_output_len, num_beams=2
             )
-            targets = decode_labels(labels.cpu().numpy(), tokenizer)
+            targets = decode_labels(labels.cpu().numpy(), tokeniser)
 
-            # Normalize predictions
             preds = [p.lower().strip() for p in preds]
 
-            # Compute ROUGE
+            #compute ROUGE scores
             for pred, tgt in zip(preds, targets):
                 for key in total_f1.keys():
                     total_f1[key] += scorer.score(tgt, pred)[key].fmeasure
                 n_examples += 1
 
-    # guard against division by zero
+    #guard against division by zero
     if n_examples == 0:
         return {k: 0.0 for k in total_f1}
     avg_rouge = {k: v / n_examples for k, v in total_f1.items()}
     return avg_rouge
 
-# ---------------------------
-# Training loop
-# ---------------------------
+#training loop
 best_rouge = -1.0
-print("🚀 Starting quick full-length training...")
+print("Starting quick full-length training...")
 
 global_step = 0
 for epoch in range(1, NUM_EPOCHS + 1):
@@ -145,36 +137,33 @@ for epoch in range(1, NUM_EPOCHS + 1):
         attention_mask = batch["attention_mask"].to(DEVICE)
         labels = batch["labels"].to(DEVICE)
 
-        optimizer.zero_grad()
+        optimiser.zero_grad()
         outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
         loss = outputs.loss
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        optimiser.step()
 
         running_loss += loss.item()
 
     avg_train_loss = running_loss / len(train_loader)
     print(f"✅ Epoch {epoch} — Avg train loss: {avg_train_loss:.4f}")
 
-    # Validation — print full set of ROUGE scores
-    avg_val_rouge = evaluate(wrapper, val_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
-    # formatted print of all metrics
+    #validation after each epoch
+    avg_val_rouge = evaluate(wrapper, val_loader, tokeniser, scorer, DEVICE, MAX_OUTPUT_LEN)
     metrics_str = ", ".join([f"{k}: {v:.4f}" for k, v in avg_val_rouge.items()])
-    print(f"📊 Validation ROUGE — {metrics_str}")
+    print(f"Validation ROUGE — {metrics_str}")
 
-    # keep same saving criterion (based on rougeLsum)
+    #save best model
     if avg_val_rouge.get("rougeLsum", 0.0) > best_rouge:
         best_rouge = avg_val_rouge["rougeLsum"]
         os.makedirs(SAVE_DIR, exist_ok=True)
         wrapper.save_pretrained(SAVE_DIR)
-        print(f"💾 Saved best model to {SAVE_DIR}")
+        print(f"Saved best model to {SAVE_DIR}")
 
-# ---------------------------
-# Test evaluation
-# ---------------------------
-print("\n🧪 Evaluating best model on test set...")
-avg_test_rouge = evaluate(wrapper, test_loader, tokenizer, scorer, DEVICE, MAX_OUTPUT_LEN)
+#test evaluation, although doesnt work as testing set doesnt have any target summaries
+print("\nEvaluating best model on test set...")
+avg_test_rouge = evaluate(wrapper, test_loader, tokeniser, scorer, DEVICE, MAX_OUTPUT_LEN)
 metrics_str = ", ".join([f"{k}: {v:.4f}" for k, v in avg_test_rouge.items()])
-print(f"🏁 Test ROUGE — {metrics_str}")
+print(f"Test ROUGE — {metrics_str}")

@@ -2,9 +2,9 @@ import torch
 from torch.utils.data import Dataset
 
 class BioLayDataset(Dataset):
-    def __init__(self, hf_dataset, tokenizer, max_input=512, max_output=128):
+    def __init__(self, hf_dataset, tokeniser, max_input=512, max_output=128):
         self.dataset = hf_dataset
-        self.tokenizer = tokenizer
+        self.tokeniser = tokeniser
         self.max_input = max_input
         self.max_output = max_output
 
@@ -18,11 +18,11 @@ class BioLayDataset(Dataset):
 
         # If summary is empty/whitespace, give a tiny placeholder so labels aren't all -100
         if not isinstance(summary, str) or summary.strip() == "":
-            # use tokenizer.eos_token if available, else a small placeholder
-            summary = (self.tokenizer.eos_token or "</s>") if getattr(self.tokenizer, "eos_token", None) else "No summary."
+            # use tokeniser.eos_token if available, else a small placeholder
+            summary = (self.tokeniser.eos_token or "</s>") if getattr(self.tokeniser, "eos_token", None) else "No summary."
 
-        # Tokenize input (fixed max length)
-        inputs = self.tokenizer(
+        # Tokenise input 
+        inputs = self.tokeniser(
             report,
             truncation=True,
             padding="max_length",
@@ -30,8 +30,8 @@ class BioLayDataset(Dataset):
             return_tensors="pt"
         )
 
-        # Tokenize target but keep at most max_output tokens; use max_length padding so we have stable label length
-        targets = self.tokenizer(
+        # Tokenise target but keep at most max_output tokens; use max_length padding so we have stable label length
+        targets = self.tokeniser(
             summary,
             truncation=True,
             padding="max_length",
@@ -45,7 +45,7 @@ class BioLayDataset(Dataset):
         labels = targets.input_ids.squeeze(0).long()
 
         # Replace pad tokens with -100 so loss ignores them
-        labels[labels == self.tokenizer.pad_token_id] = -100
+        labels[labels == self.tokeniser.pad_token_id] = -100
 
         return {
             "input_ids": input_ids,
