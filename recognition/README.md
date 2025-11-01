@@ -7,21 +7,21 @@
 
 ## Dataset Description
 
-The project uses the **BioLaySumm2025-LaymanRRG-opensource-track** dataset, which is specifically designed for radiology report simplification.  
-It is split into:
+The project uses the BioLaySumm2025-LaymanRRG-opensource-track dataset, which is specifically designed for radiology report simplification.  
+It is already split into:
 - **Training:** 150,000 examples  
 - **Validation:** 10,000 examples  
 - **Testing:** 10,500 examples  
 
-Each record contains **four columns**:
-1. **source** – metadata about data origin (not used in training)  
-2. **image_path** – reference to the related image (not used in training)  
-3. **radiology_report** – the full expert-written radiology report  
-4. **layman_report** – the corresponding simplified lay summary  
+Each record contains four columns:
+- **source** – metadata about data origin (not used in training)  
+- **image_path** – reference to the related image (not used in training)  
+- **radiology_report** – the full expert-written radiology report  
+- **layman_report** – the corresponding simplified lay summary  
 
 During training, only the `radiology_report` (input) and `layman_report` (target) columns are used.  
 The `radiology_report` serves as the expert-level medical input, while the `layman_report` represents the desired human-understandable output.  
-This pairing allows the model to learn how to translate clinical jargon and findings into clear, accessible language.
+This pairing allows the model to learn how to translate technical medical language and findings into clear, accessible language.
 
 ## Setup and Usage
 
@@ -29,8 +29,6 @@ This pairing allows the model to learn how to translate clinical jargon and find
 
 Visual Studio Code is recommended for editing, running, and debugging the project.  
  
-
----
 
 ### 2. Install CUDA (For NVIDIA GPUs)
 
@@ -87,27 +85,27 @@ python predict.py
 
 ## File Structure
 
-- **train.py** – Handles training the model. Loads the dataset, initializes the model, and runs the training loop with logging.  
+- **train.py** – Handles training the model. Loads the dataset, initialises the model, and runs the training loop with logging.  
 - **predict.py** – Runs the trained model to show example predictions. Displays a few inputs along with their translated outputs.  
 - **modules.py** – Contains reusable functions, helper routines, and model components that are shared across scripts.  
 - **dataset.py** – Manages data loading and preprocessing. Converts raw data into batches suitable for training or evaluation.
 
 ## Data Cleaning and Preprocessing
 
-The dataset is cleaned and preprocessed in `dataset.py` before training:  
+The dataset is prepared in `dataset.py` before training:
 
-- Removes invalid or corrupted entries.  
-- Normalises text or input data to a consistent format.  
-- Tokenises or encodes inputs for the model.  
-- Splits the data into batches for efficient training and evaluation.
+- Handles empty or missing summaries by inserting a placeholder token.  
+- Tokenises and encodes both expert (radiology) and layman reports into tensors for model input.  
+- Pads and truncates text sequences to fixed lengths for consistency.  
+- Batches data efficiently during training and evaluation using PyTorch’s `DataLoader`.
 
 ## Flan-T5 Model
 
-Flan-T5 is a large language model developed by Google that has been fine-tuned to follow a wide range of instructions. It uses an encoder-decoder transformer architecture, which makes it well suited for tasks like translation or converting one type of input into another.
+Flan-T5 is a large language model developed by Google, built on an encoder-decoder transformer architecture. It is designed for instruction-following and text-to-text tasks such as translation, summarisation, and explanation generation.
 
-The encoder reads and understands the input, while the decoder generates the output based on that understanding. Both parts use multiple layers of transformers with attention mechanisms to capture complex patterns. A typical base version has hundreds of millions of parameters, many layers, and large hidden dimensions, allowing the model to learn sophisticated input-output mappings.
+The encoder processes and represents the input (expert radiology report), while the decoder generates a corresponding layman-friendly summary. Both components use multi-layer transformers with self and cross attention to capture complex dependencies.
 
-In this project, Flan-T5 can take input examples and produce accurate translations or transformations with minimal additional training. Its strengths include strong instruction-following, flexibility for different tasks, and the ability to generalize from small datasets. On the downside, Flan-T5 can be **resource-intensive**, requiring significant memory and computational power, and fine-tuning large versions can be slow or expensive.
+In this project, Flan-T5 is fine-tuned on paired expert–layman reports, allowing it to learn how to translate professional radiology language into accessible summaries. This provides high-quality, domain-adapted outputs, though training large versions can be computationally demanding and memory intensive.
 
 
 ## Fine-Tuning Strategy
@@ -116,31 +114,44 @@ For this project, a Flan-T5-small model was fine-tuned for translating or transf
 
 - **Layers & hidden size:** The Flan-T5-small base model has 6 transformer layers and a hidden dimension of 512 units. This setup provides sufficient capacity to model complex relationships in the input data while keeping training manageable.
 
-- **Classifier / output head:** A custom classification head was added on top of the decoder outputs to map predictions to the target token space, ensuring the model generates outputs that align with the task-specific labels.
+- **Classifier / output head:** The standard T5 decoder head is used to map predictions to the target token space, ensuring the model generates outputs that align with the task-specific labels. No custom classification layer was added.
 
-- **Loss function:** The model was trained using **cross-entropy loss**, which measures how well the predicted tokens match the target tokens. This loss is effective for sequence-to-sequence tasks because it encourages the model to assign high probabilities to the correct outputs.
+- **Loss function:** The model was trained using cross-entropy loss, which measures how well the predicted tokens match the target tokens. This loss is effective for sequence-to-sequence tasks because it encourages the model to assign high probabilities to the correct outputs.
 
-- **Fine-tuning strategy:** Parameter-efficient fine-tuning techniques, such as adapters or LoRA, were applied to update only a subset of the model weights. This reduces memory requirements and training time while still allowing the model to adapt effectively to the task.
+- **Fine-tuning strategy:** All model parameters were fine-tuned directly rather than using parameter-efficient methods such as adapters or LoRA. This allows the model to fully adapt to the dataset, though it requires more memory and training time.
 
-- **Epochs:** The model was trained for 5 epochs, which balances learning task-specific patterns while minimizing the risk of overfitting on the relatively small dataset.
+- **Epochs:** The model was trained for 5 epochs, which balances learning task-specific patterns while minimising the risk of overfitting on the dataset.
 
-- **Optimizer & learning rate:** AdamW was used with a learning rate of 5e-6, providing stable updates suitable for fine-tuning large pretrained models.
+- **Optimiser & learning rate:** AdamW was used with a learning rate of 5e-6, providing stable updates suitable for fine-tuning large pretrained models.
+
+- **Gradient:** During training, gradients of the loss with respect to the model parameters are computed automatically via `loss.backward()`. To maintain stable training and prevent exploding gradients, the model applies gradient clipping using `torch.nn.utils.clip_grad_norm_`.
 
 This configuration was chosen to allow efficient adaptation of Flan-T5-small to the task while keeping training time and GPU memory requirements reasonable.
 
+
+### Overfitting and Regularisation
+
+Overfitting occurs when the model memorises training data rather than learning generalisable patterns, leading to poor performance on unseen examples.  
+To mitigate overfitting in BioLaySumm:
+
+- **Validation Monitoring:** The model is evaluated on a held-out validation set after each epoch. Only improvements in validation ROUGE-Lsum trigger checkpoint saving.  
+- **Gradient Clipping:** Prevents extremely large gradient updates that could destabilise training.  
+- **Input Handling:** Although no traditional data augmentation is used, the preprocessing stage includes truncation, padding, and placeholder replacements for missing summaries. These steps improve consistency and model robustness.  
+
+
 ## Model Saving
 
-During training, the model is saved to a directory (default: `best_model`) whenever the current epoch achieves a **better validation ROUGE-Lsum score** than all previous epochs. This ensures that only the best-performing version of the model is retained.  
+During training, the model is saved to a directory (default: `best_model`) whenever the current epoch achieves a higher validation ROUGE-Lsum score than all previous epochs. This ensures that only the best-performing version of the model is kept.  
 
-The following files are saved:  
+The following files are typically saved:  
 
-- **`config.json`** – Stores the model architecture and configuration parameters.  
-- **`generation_config.json`** – Contains settings used for text generation, like maximum length or beam size.  
-- **`model.safetensors`** – Contains the trained weights of the model in a safe and efficient format.  
-- **`special_tokens_map.json`** – Maps special tokens (like padding, start/end tokens) to their intended purpose.  
-- **`tokenizer_config.json` & `tokenizer.json`** – Include the vocabulary, tokenization rules, and other settings needed to convert text to input tokens and back.  
+- **`config.json`** – Defines the model architecture and configuration parameters.  
+- **`generation_config.json`** – May be automatically created; contains text generation settings such as maximum length or beam size.  
+- **`pytorch_model.bin`** or **`model.safetensors`** – Stores the trained model weights.  
+- **`special_tokens_map.json`** – Maps special tokens   
+- **`tokenizer_config.json` and `tokenizer.json`** – Contain the vocabulary and tokenisation rules needed to convert text to model inputs and back.  
 
-In `predict.py`, you can change the path to this saved model directory to load a different trained model and generate outputs. This allows you to easily switch between versions of the model for testing or demonstration. For example:  
+In `predict.py`, you can modify the model path to load a specific saved version for testing or demonstration. For example:
 
 ```python
 wrapper = FlanT5Summarizer(model_name="path/to/best_model", device=DEVICE)
@@ -148,11 +159,11 @@ wrapper = FlanT5Summarizer(model_name="path/to/best_model", device=DEVICE)
 
 ## Training and Testing
 
-Training and evaluation for this project were performed on a Windows PC equipped with an **RTX 5070 GPU with 12GB of VRAM**. Due to GPU memory limitations, the batch size was set to 2, and full-length inputs and outputs were used to ensure accurate training and evaluation.
+Training and evaluation for this project were performed on a Windows PC equipped with an RTX 5070 GPU with 12GB of VRAM. Due to GPU memory limitations, the batch size was set to 2, and full length inputs and outputs were used to ensure accurate training and evaluation.
 
-- **Training:** The Flan-T5-small model was trained for 5 epochs using parameter-efficient fine-tuning techniques. Training the full dataset took approximately **36 hours** on this hardware.
+- **Training:** The Flan-T5-small model was trained for 5 epochs using parameter efficient fine tuning techniques. Training the full dataset took approximately 36 hours on this hardware.
 
-- **Validation & Testing:** After each epoch, the model was evaluated on a validation set to monitor performance and select the best model based on ROUGE scores. Final evaluation was conducted on a held-out test set to report the model’s predictive performance.
+- **Validation & Testing:** After each epoch, the model was evaluated on a validation set to monitor performance and select the best model based on ROUGE scores. Final evaluation was conducted on a held out test set to report the model’s predictive performance.
 
 ## Example Analysis 1
 
@@ -166,8 +177,8 @@ The heart is enlarged. There's a pacemaker on the left side of the chest with wi
 
 **What it did well:**
 - Correctly translated medical terms into lay language:  
-  - "Cardiomegaly" → "The heart is enlarged"  
-  - "Pleural effusion" → "fluid buildup in the pleural space"
+  - "Cardiomegaly" to "The heart is enlarged"  
+  - "Pleural effusion" to "fluid buildup in the pleural space"
 - Explained the pacemaker placement clearly.
 - Retained all key findings from the expert report.
 
@@ -187,12 +198,12 @@ A chest X-ray was taken from the front. Compared to a previous image from 2016, 
 
 **What it did well:**
 - Correctly simplified medical terms for lay understanding:  
-  - "Bilateral peripheral opacities" → "both sides of the lungs show some cloudiness"  
-  - "Reticular infiltrates suggestive of infectious pathology" → "areas...that suggest an infection, possibly COVID-19"
+  - "Bilateral peripheral opacities" to "both sides of the lungs show some cloudiness"  
+  - "Reticular infiltrates suggestive of infectious pathology" to "areas...that suggest an infection, possibly COVID-19"
 - Maintained all key findings and context from the expert report.
 
 **What could be improved:**
-- The phrasing “under-inflated, and not well-informed” is inaccurate and confusing; it misrepresents the intended meaning of the original radiology comment about poor technique and underpenetration.
+- The phrasing “under-inflated, and not well-informed” is inaccurate and confusing as it misrepresents the intended meaning of the original radiology comment about poor technique and underpenetration.
 - Some sentences are slightly awkward and could be made smoother for readability.
 
 ## Example Analysis 3
@@ -207,9 +218,9 @@ Looking at the x-ray compared to the one taken on October 24, there's still an i
 
 **What it did well:**
 - Clearly explains medical terms in lay language:  
-  - "Persistent increased density" → "still an increased density in the lower left part of the lungs"  
-  - "Partial obscuration of the cardiac border" → "the heart's border is not clear"  
-  - "Right hemidiaphragm" → "the right side of the diaphragm, the muscle that separates the chest from the abdomen"
+  - "Persistent increased density" to "still an increased density in the lower left part of the lungs"  
+  - "Partial obscuration of the cardiac border" to "the heart's border is not clear"  
+  - "Right hemidiaphragm" to "the right side of the diaphragm, the muscle that separates the chest from the abdomen"
 - Retains all key observations from the expert report.
 
 **What could be improved:**
@@ -228,8 +239,8 @@ There are no major issues found. The chest area, lungs, or the area around the h
 
 **What it did well:**
 - Simplified technical language while keeping most findings intact:  
-  - "No significant abnormalities" → "no major issues found"  
-  - "Thoracic parenchyma, lungs, or hilar mediastinum" → "chest area, lungs, or the area around the heart"
+  - "No significant abnormalities" to "no major issues found"  
+  - "Thoracic parenchyma, lungs, or hilar mediastinum" to "chest area, lungs, or the area around the heart"
 - Clearly describes the high-density image over D8 in understandable terms.
 
 **What could be improved:**
@@ -248,11 +259,11 @@ There are no major issues found. The chest area, lungs, or the area around the h
 | 5     | 0.7920         | 0.7261  | 0.5403  | 0.6721  | 0.6721     |
 
 **Best performance:**  
-- The **best ROUGE-Lsum score** was **0.6721** at epoch 5.  
+- The best final testing ROUGE-Lsum score was 0.6721 at epoch 5.  
 
-**Meaning of ROUGE scores:**  
-- **ROUGE-1:** Measures overlap of unigrams (single words) between generated and reference summaries.  
-- **ROUGE-2:** Measures overlap of bigrams (pairs of consecutive words).  
+Meaning of ROUGE scores:
+- **ROUGE-1:** Measures overlap of unigrams between generated and reference summaries.  
+- **ROUGE-2:** Measures overlap of bigrams.  
 - **ROUGE-L:** Measures longest common subsequence, reflecting sentence-level structure.  
 - **ROUGE-Lsum:** Aggregated LCS score for the whole summary.  
 
@@ -261,10 +272,10 @@ ROUGE scores are useful for quantifying how much generated text overlaps with re
 
 
 **Interpretation of Results:**  
-Over the 5 epochs, the training loss steadily decreased from 1.3336 to 0.7920, showing that the model gradually learned to predict target sequences more accurately. The ROUGE scores improved consistently across epochs, with ROUGE-1 reaching 0.7261, ROUGE-2 at 0.5403, and ROUGE-L and ROUGE-Lsum at 0.6721 by the final epoch. These scores indicate that the generated summaries have a high overlap with the reference lay summaries at both the word level (ROUGE-1 and ROUGE-2) and the sentence/structure level (ROUGE-L and ROUGE-Lsum). The best performance at epoch 5 suggests that the model is well-fitted to the dataset, capturing key details and phrasing patterns without overfitting, making it reliable for generating understandable lay summaries from expert reports.
+Over the 5 epochs, the ROUGE scores improved consistently across epochs, with ROUGE-1 reaching 0.7261, ROUGE-2 at 0.5403, and ROUGE-L and ROUGE-Lsum at 0.6721 by the final epoch. These scores indicate that the generated summaries have a high overlap with the reference lay summaries at both the word level (ROUGE-1 and ROUGE-2) and the sentence/structure level (ROUGE-L and ROUGE-Lsum). The best performance at epoch 5 suggests that the model is well-fitted to the dataset, capturing key details and phrasing patterns without overfitting, making it reliable for generating understandable lay summaries from expert reports.
 
 **Training loss:**  
-The average training loss decreased steadily from **1.3336** (epoch 1) to **0.7920** (epoch 5), indicating the model learned to better predict the target sequences over time.
+The average training loss decreased steadily from 1.3336 at epoch 1 to 0.7920 at epoch 5, indicating the model learned to better predict the target sequences over time.
 
 ## Overall Model Performance
 
@@ -279,7 +290,8 @@ While the current model performs well according to ROUGE scores, alternative eva
 A complementary approach would be to involve human evaluators, such as medical professionals, to rate the quality of the generated summaries on a scale of 1–10. This could help validate the model’s translations and provide guidance for further fine-tuning. The ultimate goal would be to develop a fully functional large language model capable of reliably converting medical reports into patient-friendly language.  
 
 Additionally, implementing a simple user interface or API would make the model easily accessible, allowing patients or healthcare providers to input a report and quickly receive a translated lay summary. Such a system could facilitate wider adoption and practical use in real-world clinical settings.
-
+ 
+To further improve training efficiency, early stopping could be integrated into the training loop. This would allow the model to be trained for a large number of epochs without overfitting, as training would automatically stop once the validation ROUGE scores and loss stop improving for a set number of consecutive epochs. This ensures the model is trained long enough to learn effectively but not unnecessarily beyond the point of performance gain.
 
 
 
