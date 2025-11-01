@@ -1,4 +1,17 @@
-from transformers import Autotokeniser, AutoModelForSeq2SeqLM
+"""
+modules.py
+
+Wrapper for Flan-T5 models to summarise radiology reports.
+
+This module provides:
+- FlanT5Summariser: initialises model + tokenizer on CPU/GPU.
+- Methods to generate single or batch summaries.
+- Beam search and repetition control for higher-quality outputs.
+- Easy save/load of model and tokeniser.
+
+"""
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 
 class FlanT5Summariser:
@@ -11,7 +24,7 @@ class FlanT5Summariser:
         device: 'cpu' or 'cuda' for GPU.
         """
         self.device = device
-        self.tokeniser = Autotokeniser.from_pretrained(model_name)
+        self.tokeniser = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device)
 
     def generate_summary(self, text, max_length=1024, num_beams=4):

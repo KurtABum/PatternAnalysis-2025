@@ -1,3 +1,16 @@
+"""
+predict.py
+
+Loads a trained Flan-T5 summarisation model and generates layman summaries
+for a few radiology reports from the BioLaySumm test set.
+
+Key steps:
+- Initialise model on CPU or GPU.
+- Load test dataset and select examples.
+- Generate and print summaries alongside original reports and reference lay summaries.
+
+"""
+
 import torch
 from datasets import load_dataset
 from modules import FlanT5Summariser

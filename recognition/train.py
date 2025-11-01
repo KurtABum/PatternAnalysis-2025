@@ -1,3 +1,21 @@
+"""
+train.py
+
+Full training and evaluation pipeline for Flan-T5 summarisation
+of radiology reports into layman-readable summaries.
+
+Main steps:
+- Load BioLaySumm dataset (train/val/test splits).
+- Initialise Flan-T5 model and tokeniser on CPU or GPU.
+- Wrap datasets with BioLayDataset and DataLoader.
+- Train model with AdamW, clip gradients, track loss.
+- Validate after each epoch using ROUGE metrics.
+- Save best model based on validation ROUGE-Lsum.
+- Optional test evaluation (requires target summaries).
+
+"""
+
+
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -39,7 +57,7 @@ wrapper = FlanT5Summariser(model_name=MODEL_NAME, device=DEVICE)
 tokeniser = wrapper.tokeniser
 model = wrapper.model
 
-# Quick NaN check
+#quick NaN check because transformers can be bug
 def params_have_nan(model):
     """Check if any model parameters contain NaNs"""
     for n, p in model.named_parameters():
@@ -51,7 +69,7 @@ def params_have_nan(model):
 
 has_nan, param_name = params_have_nan(model)
 if has_nan:
-    raise RuntimeError(f"Model parameter {param_name} contains NaNs — aborting.")
+    raise RuntimeError(f"Model parameter {param_name} contains NaNs.")
 
 #dataset and dataloaders
 train_dataset = BioLayDataset(train_ds, tokeniser, MAX_INPUT_LEN, MAX_OUTPUT_LEN)
@@ -124,13 +142,15 @@ def evaluate(model_wrapper, data_loader, tokeniser, scorer, device, max_output_l
 
 #training loop
 best_rouge = -1.0
-print("Starting quick full-length training...")
+print("Starting training...")
 
 global_step = 0
 for epoch in range(1, NUM_EPOCHS + 1):
     model.train()
-    running_loss = 0.0
+    running_loss = 0.0 
 
+    #iterate over training batches
+    #tqdm for progress bar and timing
     for batch in tqdm(train_loader, desc=f"Training Epoch {epoch}", unit="batch"):
         global_step += 1
         input_ids = batch["input_ids"].to(DEVICE)
@@ -148,7 +168,7 @@ for epoch in range(1, NUM_EPOCHS + 1):
         running_loss += loss.item()
 
     avg_train_loss = running_loss / len(train_loader)
-    print(f"✅ Epoch {epoch} — Avg train loss: {avg_train_loss:.4f}")
+    print(f"Epoch {epoch} — Avg train loss: {avg_train_loss:.4f}")
 
     #validation after each epoch
     avg_val_rouge = evaluate(wrapper, val_loader, tokeniser, scorer, DEVICE, MAX_OUTPUT_LEN)

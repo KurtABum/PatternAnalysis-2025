@@ -1,17 +1,33 @@
+"""
+dataset.py
+
+Wraps a Hugging Face dataset for radiology-to-layman text generation tasks.
+
+This dataset class:
+- Reads radiology reports and their simplified summaries.
+- Tokenizes both inputs and targets for model training.
+- Handles empty summaries by inserting a minimal placeholder.
+- Ensures padding tokens are ignored in loss computation.
+
+"""
+
 import torch
 from torch.utils.data import Dataset
 
 class BioLayDataset(Dataset):
     def __init__(self, hf_dataset, tokeniser, max_input=512, max_output=128):
+        """ Wrap a Hugging Face dataset for radiology report summarisation."""
         self.dataset = hf_dataset
         self.tokeniser = tokeniser
         self.max_input = max_input
         self.max_output = max_output
 
     def __len__(self):
+        """Return length of dataset."""
         return len(self.dataset)
 
     def __getitem__(self, idx):
+        """Get tokenised input and target tensors for index idx."""
         item = self.dataset[idx]
         report = item.get("radiology_report", "")
         summary = item.get("layman_report", "")
